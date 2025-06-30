@@ -1,0 +1,6 @@
+mtcaic3.zip
+mtcaic3/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

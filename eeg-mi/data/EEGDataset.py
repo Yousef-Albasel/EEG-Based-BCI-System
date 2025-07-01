@@ -1,8 +1,16 @@
+"""
+This class implements the creations of the EEG Dataset, the trials are gathered from the csv files, 
+preprocessed and features are extracted using this dataset class
+"""
+
 from scipy.signal import welch
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset, DataLoader
+from scipy.stats import skew, kurtosis
+
 import numpy as np
 import pandas as pd
+import pywt
 
 class EEGDataset(Dataset):
     def __init__(self, df, base_path, preprocessor, sfreq=250, nperseg=256, has_labels=True):
@@ -34,7 +42,7 @@ class EEGDataset(Dataset):
         features = []
         for ch in range(eeg.shape[1]):
             freqs, psd = welch(eeg[:, ch], fs=self.sfreq, nperseg=self.nperseg)
-            band_psd = psd[(freqs >= 8) & (freqs <= 30)]  # Mu + Beta
+            band_psd = psd[(freqs >= 8) & (freqs <= 30)]
             features.append(band_psd)
         return np.concatenate(features)
 

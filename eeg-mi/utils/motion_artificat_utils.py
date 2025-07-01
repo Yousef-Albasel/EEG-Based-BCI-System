@@ -36,10 +36,8 @@ def filter_defective_trials(df, base_path, score_threshold_z=2.5):
         score = motion_artifact_score(trial_df)
         scores.append(score)
 
-    # Convert to NumPy and Z-score
     scores = np.array(scores)
     z_scores = (scores - scores.mean()) / scores.std()
 
-    # Filter rows where |z| < threshold
     clean_mask = np.abs(z_scores) < score_threshold_z
     return df[clean_mask].reset_index(drop=True), scores, z_scores

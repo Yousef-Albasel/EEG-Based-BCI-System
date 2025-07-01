@@ -11,9 +11,9 @@ from preprocessing.EEGPreprocessor import EEGPreprocessor
 def infer(model_path, data_path, base_path, output_path, scaler_type="standard"):
     print(f"Loading model from: {model_path}")
     model = joblib_load(model_path)
-
+    
     with open(data_path, "rb") as f:
-        X_train, _, _, _ = pickle.load(f)
+        X_train, _, _, _, _= pickle.load(f)
 
     test_df = pd.read_csv(f"{base_path}/test.csv")
     test_df = test_df[test_df['task'] == 'MI']

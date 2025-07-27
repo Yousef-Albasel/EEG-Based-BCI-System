@@ -1,97 +1,55 @@
-"""
-Training script for SSVEP classification
-"""
-
-import pickle
+import torch
+import torch.nn as nn
 import numpy as np
-import os
-from models import SSVEPClassifier
-from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
+from sklearn.metrics import classification_report, accuracy_score
+from sklearn.model_selection import KFold
+from sklearn.preprocessing import LabelEncoder
+from data.EEGDataset import EEGFeatureDataset , EEGDataLoader
+from torch.utils.data import DataLoader, Subset
+from models import MLP
 
+def train(model, train_loader, val_loader, device):
+    model.to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    loss_fn = nn.CrossEntropyLoss()
+    for epoch in range(10):
+        model.train()
+        for xb, yb in tqdm(train_loader, desc=f"Epoch {epoch+1}/10"):
+            xb, yb = xb.to(device), yb.to(device)
+            pred = model(xb)
+            loss = loss_fn(pred, yb)
+            opt.zero_grad(); loss.backward(); opt.step()
+    model.eval()
+    all_preds, all_true = [], []
+    with torch.no_grad():
+        for xb, yb in val_loader:
+            xb = xb.to(device)
+            pred = model(xb).argmax(1).cpu().numpy()
+            all_preds.extend(pred)
+            all_true.extend(yb.numpy())
+    print(classification_report(all_true, all_preds))
+    acc = accuracy_score(all_true, all_preds)
+    return model, acc
 
-def main(data_path, save_dir="models"):
-    """
-    Main training function
-    
-    Parameters:
-    -----------
-    data_path : str
-        Path to the pickled features file
-    save_dir : str
-        Directory to save trained models
-    """
-    print("🚀 Starting SSVEP Model Training...")
-    print("="*50)
-    
-    # Load features
-    print("📂 Loading features...")
-    with open(data_path, 'rb') as f:
-        data = pickle.load(f)
-    
-    X_train = data['X_train']
-    y_train = data['y_train']
-    X_val = data['X_val']
-    y_val = data['y_val']
-    train_df = data['train_df']
-    
-    print(f"📊 Training features shape: {X_train.shape}")
-    print(f"📊 Validation features shape: {X_val.shape}")
-    
-    # Initialize classifier
-    classifier = SSVEPClassifier()
-    
-    # Train the model
-    print("\n🎯 Training SVM classifier...")
-    classifier.fit(X_train, y_train)
-    
-    # Evaluate on validation set
-    print("\n📈 Evaluating on validation set...")
-    val_results = classifier.evaluate(X_val, y_val)
-    
-    # Cross-validation
-    print("\n🔄 Performing cross-validation...")
-    cv_results = classifier.cross_validate(X_train, y_train, cv=5)
-    
-    # Leave-One-Subject-Out Cross-Validation
-    if 'subject_id' in train_df.columns:
-        print("\n🧪 Performing Leave-One-Subject-Out CV...")
-        subject_ids = train_df['subject_id'].values
-        loso_results = classifier.leave_one_subject_out_cv(X_train, y_train, subject_ids)
-    
-    # Save the model
-    os.makedirs(save_dir, exist_ok=True)
-    model_path = os.path.join(save_dir, 'ssvep_model.joblib')
-    scaler_path = os.path.join(save_dir, 'scaler.joblib')
-    
-    classifier.save_model(model_path, scaler_path)
-    
-    # Save training results
-    results = {
-        'validation_results': val_results,
-        'cv_results': cv_results,
-        'loso_results': loso_results if 'subject_id' in train_df.columns else None,
-        'model_path': model_path,
-        'scaler_path': scaler_path
-    }
-    
-    results_path = os.path.join(save_dir, 'training_results.pkl')
-    with open(results_path, 'wb') as f:
-        pickle.dump(results, f)
-    
-    print(f"\n💾 Training results saved to {results_path}")
-    print("✅ Training completed successfully!")
-    
-    return results
+def train_main(data_path):
+    raw_dataset = EEGDataLoader(data_path)
+    ssvep_train_df,_,_ = raw_dataset.load_csv_files()
+    label_encoder = LabelEncoder().fit(ssvep_train_df['label'])
+    dataset = EEGFeatureDataset(ssvep_train_df, label_encoder , data_path)
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+    accs = []
+    trained_model = None
 
+    for fold, (train_idx, val_idx) in enumerate(kf.split(dataset)):
+        print(f"\n📁 Fold {fold+1}/5")
+        train_loader = DataLoader(Subset(dataset, train_idx), batch_size=32, shuffle=True)
+        val_loader = DataLoader(Subset(dataset, val_idx), batch_size=32)
+        model = MLP(dataset[0][0].shape[0], len(label_encoder.classes_))
+        model, acc = train(model, train_loader, val_loader, torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+        trained_model = model
+        accs.append(acc)
 
-if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) < 2:
-        print("Usage: python train.py <data_path> [save_dir]")
-        sys.exit(1)
-    
-    data_path = sys.argv[1]
-    save_dir = sys.argv[2] if len(sys.argv) > 2 else "models"
-    
-    main(data_path, save_dir)
+    print(f"\n📊 Mean Accuracy: {np.mean(accs):.2%} ± {np.std(accs):.2%}")
+    torch.save(trained_model.state_dict(), "deep_ssvep_model.pt")
+    print("✅ Saved model as deep_ssvep_model.pt")
